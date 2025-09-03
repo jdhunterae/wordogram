@@ -28,7 +28,7 @@ A letter-picross built from a hidden phrase. Each row and column shows the lette
 
 ---
 
-## 2) Data Model (v1.0)
+## 2) Data Model (v0.2)
 
 ```json
 {
