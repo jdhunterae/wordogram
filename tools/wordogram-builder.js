@@ -8,8 +8,8 @@
       • An em dash between words like "done it— the" is attached to the left chunk ("it—")
     - Width calculations use the *visual* length of chunks (letters + in-chunk punctuation)
     - Lines are packed with a single inter-chunk space
-    - Any non-letter, non-space character (digits, punctuation, symbols) is rendered as overlay cells
-      (auto-filled, non-editable) and does NOT count toward row/column letter hints
+    - Any non-letter, non-space character (digits, punctuation, symbols) is rendered as overlay cells (auto-filled, non-editable),
+      and does NOT count toward row/column letter hints
 
   Usage:
     import { WordogramBuilder } from './wordogram-builder.js';
