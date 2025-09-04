@@ -36,7 +36,7 @@ A **letter-picross** built from a hidden phrase. Each **row** and **column** sho
   "cols": 0,
   "solution": ["..."], // letters + spaces only; each string length == cols
   "overlay": [
-    // auto-filled, non-editable non-letters (digits, punctuation, symbols)
+    // auto-filled, non-editable NON-LETTERS (digits, punctuation, symbols)
     { "row": 0, "col": 0, "ch": "," }
   ],
   "meta": { "phrase": "optional", "author": "optional", "date": "optional" },
@@ -48,26 +48,24 @@ A **letter-picross** built from a hidden phrase. Each **row** and **column** sho
 ### 2.1 Character Set & Normalization
 
 - **Letters:** ASCII **A–Z only**. Builder uppercases input and treats only `[A-Za-z]` as letters.
-- **Non-letters:** **Any** non-letter, non-space character (e.g., digits `0–9`, punctuation, symbols) is emitted as an `overlay` entry and occupies a visible cell in the grid.
+- **Non-letters:** Any **non-letter, non-space** character (e.g., digits `0–9`, punctuation, symbols) is emitted as an `overlay` entry and occupies a visible cell in the grid.
 - **Spaces:** Visible spaces are preserved (single space between chunks after packing).
-- **Authoring note:** Quotes/phrases must be English without accents/diacritics. If such characters are present, they are treated as non-letters and become overlay.
+- **Authoring note:** Quotes/phrases must be English without accents/diacritics. If such characters are present, they are treated as non-letters and would become overlay; avoid them when authoring.
+
 
 Derived at runtime (not stored):
 
-**Note:** Builders MAY include a transient `debug` object (e.g., packed lines and shifts) when running with `opts.debug=true`. Clients MUST ignore unknown fields.
-
 - `RowTargets[r] = Map<char, count>` from `solution[r]` (letters only).
 - `ColTargets[c] = Map<char, count>` from column letters (ignore spaces/overlay).
-- `OverlaySet = Set` of (row\*cols+col) from `overlay`.
+- `OverlaySet = Set` of (row*cols+col) from `overlay`.
 
-> Builder internal “mappingVersion” may differ; builder must output **schema v0.3**.
 
 ---
 
 ## 3) Grid & Cell Types
 
 **Overlay cell**
-Fixed punctuation from `overlay[]`. Non-interactive. Excluded from hints and validation. Always rendered.
+Fixed non-letter (digits, punctuation, symbols) from `overlay[]`. Non-interactive. Excluded from hints and validation. Always rendered.
 
 **Tile cell (non-overlay)**
 An interactive cell that may target either a **letter** _or_ a **space** in the solution. Users can type in **any** non-overlay tile.
@@ -266,16 +264,18 @@ Locked tiles are read-only; overlay punctuation is always locked.
 
 - **Split policy:** split on **whitespace only**; keep in-chunk punctuation (e.g., `"DON'T"`, `"ghost-white"`, `"it—"`).
 - **Visual width:** a chunk’s width equals its visible characters (letters + in-chunk punctuation).
-- **Overlay:** any **non-letter, non-space** character becomes `overlay` (digits, punctuation, symbols). The `solution` stores only letters + spaces; inter-chunk spacing is a single visible space.
+- **Overlay:** in-chunk punctuation becomes `overlay` entries at their visual columns; letters occupy the `solution` string; spaces between chunks are single visible spaces.
 - **Width selection:** choose `W ∈ [minWidth..maxWidth]` to minimize number of lines; tie-break smaller `W`.
 - **Line packing:** single inter-chunk spaces; greedy line breaks by `W`.
 - **Overlap shifting:** greedily shift lines horizontally (within `W`) to maximize letter overlaps; optional pins `{ row, rawIndex, targetCol }` in visible-cell coordinates.
+
+**Pins example:** For the raw string `"BAKER."` at `row 0` with `W=10`, if you want the period to end at column 9, specify a pin `{ row: 0, rawIndex: 5, targetCol: 9 }`. (Indices are zero-based; `rawIndex` is within the raw visual string that includes letters, spaces, and overlay characters.)
 
 ---
 
 ## 10) Acceptance Criteria
 
-1. **Overlay correctness:** punctuation auto-fills in correct cells; excluded from all counts.
+1. **Overlay correctness:** non-letters (digits, punctuation, symbols) auto-fill in correct cells; excluded from all counts.
 2. **Hints behavior:** letters mute **only** when all instances in that line are **locked**; with counts enabled, superscript shows **Left** (0 when complete). Updates occur **only** on validation events (Auto-check locks, Check, Hint, Clear/Reset).
 3. **Validation behavior:**
 
