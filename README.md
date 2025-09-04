@@ -406,3 +406,93 @@ orderHintLetters(letters, mode, seed):
 ## 14) Done = Ready to Code
 
 When this v1.3 is signed off, refactor the web prototype per §§11–13, then mirror the logic in Flutter with unit tests for hint updates, validation modes, stats, and ordering.
+
+---
+
+## Addendum: v0.3 Spec Clarifications (Authoritative)
+
+> This section **supersedes any conflicting phrasing earlier in the doc** and is intended to remove ambiguity for v0.3.
+
+### A. Character Set, Normalization, and Escaping
+
+- **Letters:** ASCII **A–Z only**. The builder uppercases input and treats only `[A-Za-z]` as letters.
+- **Non-letters:** **Any** non-letter, non-space character (e.g., digits `0–9`, punctuation, symbols, curly quotes, em/en dashes) is emitted as an **overlay** entry and occupies a visible grid cell.
+- **Spaces:** Visible spaces are preserved. The builder normalizes author input to **single spaces** between chunks, trimming leading/trailing whitespace and converting tabs/newlines to spaces.
+- **HTML-safety:** Overlay characters are rendered with HTML-escaping for `&`, `<`, `>`, `"`, and `'` to prevent injection. Letters and spaces are safe by construction.
+
+### B. Data Model (v0.3) — Field Semantics
+
+- **Top-level schema:** `"schema": "0.3"` is required.
+- **Meta:** `meta: { phrase?: string, author?: string, date?: string }`.
+- **Overlay entries:** `{ row, col, ch }` where `row`/`col` are 0-indexed visible coordinates and `ch` is a single-character string. (UI must escape when rendering.)
+- **Optional/unknown fields:** Clients **MUST ignore** unknown top-level fields (e.g., `debug`) for forward compatibility.
+- **IDs and spoilers:** `id` must be a **non-reversible** identifier (e.g., salted hash) to avoid leaking the solution from predictable filenames. Solutions are client-visible by design—**no security guarantees**.
+
+### C. Builder Algorithm (Deterministic)
+
+- **Tokenization:** Split the input phrase on whitespace only. Keep in-chunk punctuation/symbols (which become overlay). Examples:
+  - `DON'T STOP` → chunks: `DON'T`, `STOP`
+  - `ghost-white` → single chunk (overlay `-` in-grid)
+  - `He lived at 123 Baker Street.` → overlay for `1`, `2`, `3`, and `.`
+- **Greedy packing by width:** Search widths within `minWidth..maxWidth` (default **14..24**). Primary objective: **minimize rows**. Tie-breakers: (1) **smaller width**, (2) **smaller total shift**.
+- **Overlap shifting:** For each next line, attempt shifts `0..W-1` and pick the smallest shift that never mismatches locked letters from previous lines. Spaces/overlay cells do **not** block overlap. Cost = sum of chosen shifts across lines; pick minimal cost; tie-break by smaller first conflicting shift.
+- **Pins:** Pin coordinates are **visible column indices**. Pins are applied **before** overlap shifting on that line. If a pin makes a placement impossible, the builder must emit a readable error (`PIN_CONFLICT` with context) and abort.
+- **Determinism:** With the same `(phrase, options)`, the builder output is deterministic. Any future randomness must be **seedable** via options.
+
+### D. Hints & Validation (Player Experience)
+
+- **Letter hints:** Display letters **A→Z** only; omit zero-count entries. Counts exclude spaces and overlay.
+- **Hint budget (default):** `3` per puzzle (suggested). Revealed hints **lock** those letters in-place and updates hint bars immediately.
+- **Auto-check:**
+  - **OFF:** The grid only validates on user action (**Check**). Correct letters lock; incorrect letters mark. Lines lock spaces on completion.
+  - **ON:** Correct letters lock immediately on entry; wrong letters mark immediately; spaces lock on line completion or **Check**.
+- **Locking & clearing:** Locked cells are immutable. Provide **Clear Line** and **Clear Puzzle** actions; define that **Clear** removes user letters and marks but not overlay.
+
+### E. Input, Navigation, and Accessibility
+
+- **Typing constraints:** Accept only A–Z (mapped to uppercase) for editable cells. Ignore other printable keys except navigation/edit commands.
+- **Keyboard navigation:** Arrow keys jump across **editable** cells only (skip overlay/space). Backspace deletes then moves left to the previous editable cell.
+- **Mobile UX:** Disable autocorrect, predictive text, and smart quotes on the text input. Tap focus should never land on overlay cells.
+- **A11y:** Non-color cues (icons/borders) for locked/marked states; ARIA labels per tile (e.g., `row 2, col 5, locked letter A`); high-contrast mode toggle.
+
+### F. Presentation & Layout
+
+- **Hint bars:** Never wrap. On narrow viewports, allow horizontal scroll (or truncate with affordance). Specify maximum hint bar width before overflow handling kicks in.
+- **Responsive metrics:** Define min tile size (e.g., **36px**), min touch target (**44×44px**), and scaling rules for small screens. Maintain consistent line-height for readability.
+
+### G. Publishing & Operations (GitHub Pages)
+
+- **Distribution:** Either a dated path (e.g., `puzzles/2025-09-04.json`) or an index file `puzzles/index.json` with items `{ id, path, date }[]`.
+- **Local persistence:**
+  - Settings: `localStorage["wg:v1:settings"] = { autoCheck: boolean, theme?: "auto"|"light"|"dark" }`
+  - Per-puzzle state: `localStorage["wg:v1:puzzle:<id>"] = { grid: string[], locks: string[], hintsUsed: number, solvedAt?: ISO }`
+- **“% solved” banner:** Global stats require a backend. For v0.3 on Pages, prefer **local-only** phrasing (“Your solve streak”). If adding analytics later, include a toggle and a short privacy blurb.
+- **Privacy:** No tracking beyond local storage for v0.3.
+
+### H. QA, Guardrails, and Edge Cases
+
+- **Size limits:** Builder enforces `cols ≤ 30`, `rows ≤ 12`, and `phrase length ≤ 180` (configurable). Clear error messages on violation.
+- **Unicode hygiene:** Normalize input whitespace; preserve non-ASCII punctuation as overlay but **escape on render**.
+- **Golden tests:** Ship sample fixtures with expected `solution`/`overlay` and a few pin scenarios. Include a tiny test page to visualize outputs.
+- **Error taxonomy:** Reserve codes like `PIN_CONFLICT`, `WIDTH_UNFITTABLE`, `PHRASE_TOO_LONG`, `SCHEMA_UNSUPPORTED` for predictable handling.
+
+### I. Type Definitions (Authoritative for v0.3)
+
+```ts
+// Overlay entry coordinates are 0-indexed visible positions.
+export type OverlayEntry = { row: number; col: number; ch: string };
+
+export interface WordogramPuzzle {
+  schema: "0.3";
+  id: string;
+  rows: number;
+  cols: number;
+  solution: string[]; // length === rows; each string length === cols
+  overlay: OverlayEntry[];
+  meta?: { phrase?: string; author?: string; date?: string };
+  debug?: Record<string, unknown>; // optional; clients should ignore
+  [k: string]: unknown; // forward-compatible
+}
+```
+
+_(Optional JSON Schema can be added later; TS types above are the source of truth for v0.3.)_
