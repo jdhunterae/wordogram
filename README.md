@@ -1,34 +1,33 @@
-# Wordogram — Game & Puzzle Mechanics (Design Doc v1.2)
+# Wordogram — Game & Puzzle Mechanics (Design Doc v1.3)
 
-**Goal:** Ship a small, legible word‑puzzle that's easy to reason about and easy to port to Flutter. This doc defines the UX, data, and rules so the web prototype can be refactored cleanly.
+**Goal:** Ship a small, legible word-puzzle that’s easy to reason about and easy to port to Flutter. This document defines the UX, data, and rules.
 
 ---
 
-## 1) Core Concept (revised)
+## 1) Core Concept
 
-A letter-picross built from a hidden phrase. Each row and column shows the letters that appear in that line (optionally with counts). Punctuation auto-fills and is not part of hints.
+A **letter-picross** built from a hidden phrase. Each **row** and **column** shows the **letters that appear in that line** (optionally with counts). Punctuation auto-fills and is not part of hints.
 
-### Feedback model (no row/column glyphs)
+**Feedback model (no row/column glyphs):**
 
-- **Hint letters** (in the row/column lists) are muted only when all instances of that letter in that line are correctly placed. Otherwise they render normally.
+- **Hint letters** (in the row/column lists) are **muted** only when **all instances** of that letter in that line are correctly placed **and locked**. Otherwise they render normally.
 - **Letter tiles** communicate state themselves:
+
   - **Locked** — confirmed correct (via Auto-check, Check, or Hint); input disabled; distinct locked style.
-  - **Editable** — user can type; no verdict yet (when Auto-check is off) or until validated (when on).
-  - **Wrong** — red border when the letter is incorrect for that cell; the border clears when the letter is removed or corrected.
+  - **Editable** — user can type; no verdict yet (when Auto-check is OFF) or until validated (when ON).
+  - **Wrong** — red border when the letter is incorrect for that cell; clears when the letter is removed or corrected.
   - **Empty cells are never marked.**
 
-### Primary loop
+**Primary loop**
 
-- Scan row/column hint letters.
-- Type letters into the grid.
-- Watch hint letters mute as you complete letters in a line; tiles lock via Auto-check or Check.
-- Optionally use Hint to reveal and lock a letter.
-
-> Note: We're not using the "chip states" concept (todo/progress/done) or any ✓/✕/! line indicators. Progress is expressed solely by muting hint letters when fully satisfied and by tile-level feedback (locked / editable / wrong).
+1. Scan row/column hint letters.
+2. Type letters into the grid.
+3. Watch hint letters mute as a line’s letters are locked; tiles lock via Auto-check or Check.
+4. Optionally use **Hint** to reveal and lock a letter.
 
 ---
 
-## 2) Data Model (v0.2)
+## 2) Data Model (file schema v0.3)
 
 ```json
 {
@@ -37,92 +36,110 @@ A letter-picross built from a hidden phrase. Each row and column shows the lette
   "cols": 0,
   "solution": ["..."], // letters + spaces only; each string length == cols
   "overlay": [
-    // auto-filled, non-editable (punctuation etc.)
+    // auto-filled, non-editable non-letters (digits, punctuation, symbols)
     { "row": 0, "col": 0, "ch": "," }
   ],
   "meta": { "phrase": "optional", "author": "optional", "date": "optional" },
-  "version": "1.0"
+  "schema": "0.3",
+  "debug": "optional object (present only when builder opts.debug=true)"
 }
 ```
 
+### 2.1 Character Set & Normalization
+
+- **Letters:** ASCII **A–Z only**. Builder uppercases input and treats only `[A-Za-z]` as letters.
+- **Non-letters:** **Any** non-letter, non-space character (e.g., digits `0–9`, punctuation, symbols) is emitted as an `overlay` entry and occupies a visible cell in the grid.
+- **Spaces:** Visible spaces are preserved (single space between chunks after packing).
+- **Authoring note:** Quotes/phrases must be English without accents/diacritics. If such characters are present, they are treated as non-letters and become overlay.
+
 Derived at runtime (not stored):
 
-- `RowTargets[r] = Map<char, count>` from `solution[r]` letters only
-- `ColTargets[c] = Map<char, count>` from column letters only
-- `OverlaySet = Set(index)` from `overlay`
+**Note:** Builders MAY include a transient `debug` object (e.g., packed lines and shifts) when running with `opts.debug=true`. Clients MUST ignore unknown fields.
+
+- `RowTargets[r] = Map<char, count>` from `solution[r]` (letters only).
+- `ColTargets[c] = Map<char, count>` from column letters (ignore spaces/overlay).
+- `OverlaySet = Set` of (row\*cols+col) from `overlay`.
+
+> Builder internal “mappingVersion” may differ; builder must output **schema v0.3**.
 
 ---
 
 ## 3) Grid & Cell Types
 
-### Overlay cell
+**Overlay cell**
+Fixed punctuation from `overlay[]`. Non-interactive. Excluded from hints and validation. Always rendered.
 
-- Fixed punctuation from `overlay[]`. Non-interactive. Excluded from counts/validation. Always rendered.
+**Tile cell (non-overlay)**
+An interactive cell that may target either a **letter** _or_ a **space** in the solution. Users can type in **any** non-overlay tile.
 
-### Tile cell (non-overlay)
-
-A single interactive cell that may target either a letter or a space in the solution. Users can type in any non-overlay tile.
+**Sub-states**
 
 - **Editable — empty**: no character typed.
-- **Editable — typed**: user has entered a letter (A–Z). Still editable until validated/locked.
-- **Locked — correct letter**: confirmed match to the solution (via Auto-check, Check, or Hint). Input disabled; distinct locked style. Hint-placed letters use a distinct hint color.
-- **Locked — space**: solution is a space. This tile stays editable/empty and is not marked on its own. It locks (muted "gutter" style) only when its row or column is complete or after a Check that completes the line.
-- **Marked — wrong**: red border when the typed letter is incorrect for that cell. Clears when the letter is removed or corrected. Empty tiles are never marked.
+- **Editable — typed**: a letter (A–Z) is present; still editable until validated/locked.
+- **Locked — correct letter**: confirmed match (via Auto-check, Check, or Hint). Input disabled; distinct locked style. Hint-placed letters use a distinct **hint color**.
+- **Locked — space**: solution is a space. During play it stays editable/empty and is **never marked** by itself. It locks (muted “gutter” style) **only when its row or column is complete** or after a **Check** that completes that line.
+- **Marked — wrong**: red border when the typed letter is incorrect for that cell. The border clears when the letter is removed or corrected. **Empty tiles are never marked.**
 
-### Typing rules
+**Typing rules**
 
-- Accept only letters A–Z; input uppercased. Backspace clears the cell.
-- For a tile whose solution is a space: typing any letter is wrong whenever validation is active (Auto-check ON, or during a Check). Leaving it empty is neutral and never marked.
+- Accept only letters **A–Z**; input is uppercased. Backspace clears the cell.
+- If the solution at this tile is a **space**: any typed letter is **wrong** whenever validation is active (Auto-check ON, or during a Check). Leaving it empty is neutral and never marked.
 
-### Typing feedback (controlled by Auto-check)
+**Typing feedback (controlled by Auto-check)**
 
-- **Auto-check OFF →** no per-keystroke validation; tiles are validated/locked only on Check.
-- **Auto-check ON →** immediate validation: correct letters lock as you type; wrong letters show a red border that clears on erase. Space targets never lock on type; they lock only via line completion or Check.
+- **Auto-check OFF** → no per-keystroke validation; tiles validate/lock only on **Check**.
+- **Auto-check ON** → immediate validation: correct letters lock as you type; wrong letters show a red border that clears on erase. Space targets never lock on type; they lock only via **line completion** or **Check**.
 
 ---
 
 ## 4) Hints UI
 
-### 4.1 Layout (no wrapping)
+### 4.1 Layout (no wrapping, no internal scroll)
 
-- **Row hints**: render as a single horizontal line to the left of each grid row.
-  - Must not wrap to a second visual line inside the row’s hint tile.
-  - If content exceeds width, horizontally scroll that hint area (no wrap).
-- **Column hints**: render as a single vertical stack above each grid column.
-  - Must not wrap into a second side-by-side column inside the column’s hint tile.
-  - If content exceeds height, vertically scroll that hint area (no wrap).
-- Hint tile dimensions are tied to the grid cell size; overflow is managed by scrollbars or auto-scroll behavior (no overflow into neighbors, no wrapping).
+- **Row hints**: render as a **single horizontal line** to the left of each grid row. **Never wraps.** If content would overflow, the **hint area expands horizontally**; the overall page/grid may scroll.
+- **Column hints**: render as a **single vertical stack** above each grid column. **Never wraps.** If content would overflow, the **hint area expands vertically**; the overall page/grid may scroll.
+- Hint areas do **not** use internal scrollbars or fades; they expand to fit content and never bleed into neighboring tiles. Hint tile dimensions are tied to the grid cell size; placement aligns with the grid.
 
 ### 4.2 What hints show (letters only; optional counts)
 
-There are **no chips and no line glyphs (no ✓/✕/!)**. Hints are just letters (A–Z), optionally with a small superscript number.
+There are **no chips and no glyphs** (no ✓/✕/!). Hints are just **letters** (A–Z), optionally with a small **superscript** number.
 
 - **Counts disabled**
-  - **Normal**: show each distinct letter that appears in that row/column.
-  - **Completed**: mute a letter when all instances of that letter in that line have been locked (i.e., confirmed correct in the grid). No number is shown.
-- **Counts enabled**
-  - **Normal**: show each distinct letter with a `sup` of how many are left to be found in that line.
-    - `left(letter) = targetCount(letter in line) − lockedCount(letter in line)`
-    - `lockedCount` counts only tiles that are locked-correct (via Auto-check, Check, or Hint). Typed-but-not-validated letters do not reduce `left`.
-  - **Completed**: mute the letter and show `sup 0` when all instances are locked.
 
-> A letter is muted only when its lockedCount meets the target (all instances placed). Merely typing a letter (not yet validated/locked) never mutes it or reduces left.
+  - **Normal**: show each distinct letter that appears in that line.
+  - **Completed**: **mute** a letter when **all instances** of that letter in the line have been **locked**. (No number is shown.)
+
+- **Counts enabled**
+
+  - **Normal**: show each distinct letter with a `sup` of how many are **left to be found** in that line:
+    `Left(letter) = TargetCount(letter in line) − LockedCount(letter in line)`
+    `LockedCount` counts **only locked-correct** tiles (Auto-check, Check, Hint). Typed-but-not-validated letters do **not** reduce `Left`.
+  - **Completed**: **mute** the letter and show `sup 0` when **all instances** are locked.
+
+> A letter is muted **only** when its **LockedCount** meets the target. Merely typing a letter (not yet validated/locked) never mutes it or reduces `Left`.
 
 ### 4.3 When hint states update
 
-Hint visuals update only on validation events:
+Hint visuals update **only** on validation events:
 
-- **Auto-check ON**: immediately after a keystroke locks a correct letter, or when a typed letter is erased (which may unmark a wrong border but does not unlock already-locked tiles).
-- **Check button**: after processing (locking correct tiles and marking wrong ones).
-- **Hint button**: immediately after a hint fills and locks a letter.
-- **Clear / Reset**: recompute from scratch (everything returns to normal/unmuted with full `left` counts).
+- Auto-check **ON**: immediately after a keystroke locks a correct letter.
+- **Check** button: after processing (locking correct tiles and marking wrong ones).
+- **Hint** button: immediately after a hint fills and locks a letter.
+- **Clear / Reset**: recompute from scratch (everything returns to unmuted with full `Left` counts).
 
 ### 4.4 Calculation details & edge cases
 
-- Target counts per line are derived from `solution` letters only (ignore spaces and overlay).
-- Locked counts per line count only locked-correct tiles that match `solution` at that position (includes hint-placed letters).
-- If a user over-types extra instances of a letter in wrong positions, those are not locked and do not reduce `left`.
-- Muting is per-line: a letter may be muted in one row/column and still normal in another.
+- Targets per line are derived from `solution` **letters only** (ignore spaces and overlay).
+- Locked counts per line count **only locked-correct** tiles (includes hint-placed letters).
+- Over-typed extra instances of a letter in wrong positions are **not** locked and do **not** reduce `Left`.
+- Muting is **per-line**: a letter may be muted in one row/column and normal in another.
+
+### 4.5 Hint letter ordering
+
+To avoid revealing word order, **do not** preserve first-occurrence order. The ordering is configurable:
+
+- **Default:** alphabetical **A→Z** (stable).
+- **Optional modes:** **vowels-first** (A,E,I,O,U then B→Z), or a **deterministic shuffle** seeded by the puzzle ID (so all players see the same order for a given puzzle).
 
 ---
 
@@ -132,43 +149,47 @@ Hint visuals update only on validation events:
 
 For a line `L` (row or column):
 
-- `Target[L][ch]` = number of times letter ch appears in solution for that line (letters only; ignore spaces/overlay).
-- `Locked[L][ch]` = number of locked-correct tiles in that line whose letter is ch (includes letters locked by Auto-check, Check, or Hint; never counts typed-but-unvalidated letters).
-- `Left[L][ch] = max( Target[L][ch] − Locked[L][ch], 0 )`.
+- `Target[L][ch]` = number of times letter `ch` appears in `solution` for that line (letters only).
+- `Locked[L][ch]` = number of **locked-correct** tiles in that line whose letter is `ch`.
+- `Left[L][ch] = max(Target[L][ch] − Locked[L][ch], 0)`.
 
-Hint visuals depend only on `Locked` (**not on typed letters**):
-
-- **Counts OFF**: a hint letter is **muted** if `Left[L][ch] == 0`; otherwise normal.
-- **Counts ON**: show `ch` with `sup Left[L][ch]`; the letter is muted when `Left[L][ch] == 0` (still display `sup 0`).
-
-Hint areas update only on validation events (Auto-check locks a letter, Check runs, Hint places a letter, Clear/Reset).
+Hint visuals depend only on **Locked** (not on typed letters).
 
 ### 5.2 Validation model
 
-#### Auto-check OFF (manual)
+**Auto-check OFF (manual):**
 
-- Typing does not validate.
-- On Check:
-  - If a typed letter equals `solution[r][c]` → lock that tile.
-  - If a typed letter does not equal `solution[r][c]` → mark red (incorrect).
-  - Empty tiles are not marked (no green/red).
+- Typing does **not** validate.
+- On **Check**:
 
-#### Auto-check ON (immediate)
+  - If a typed letter equals `solution[r][c]` → **lock** that tile.
+  - If a typed letter does **not** equal `solution[r][c]` → **mark red** (incorrect).
+  - **Empty tiles are not marked** (no green/red).
+
+**Auto-check ON (immediate):**
 
 - On each keystroke in a non-locked, non-overlay tile:
+
   - If empty → clear any red border.
   - If typed letter == `solution[r][c]` → **lock** immediately.
-  - Else → mark red; removing the letter clears the red border.
+  - Else → **mark red**; removing the letter clears the red border.
+
 - Locked tiles ignore further input.
 
-**Space targets**: If `solution[r][c]` is a space, any typed letter is wrong when validation is active (red border in Auto-check; marked red on Check). Leaving it empty is neutral and never marked.
+**Space targets:** If `solution[r][c]` is a **space**, any typed letter is **wrong** when validation is active (red border in Auto-check; marked red on Check). Leaving it empty is neutral and never marked.
+
+**Navigation & backspace with locks (both modes):**
+
+- Locked tiles are **read-only** until **Clear/Reset**.
+- Backspace and arrow navigation **skip over locked tiles** to the nearest previous/next editable tile; if none exists, the caret stays on the nearest editable.
+- Validation is synchronous; if UI throttling is used, apply keystrokes after prior validation completes (avoid “type then instant erase” glitches).
 
 ### 5.3 Locking rules
 
-A tile becomes locked when:
+A tile becomes **locked** when:
 
 - it’s validated correct by **Auto-check** or **Check**, or
-- it’s filled by Hint (uses a distinct hint text color).
+- it’s filled by **Hint** (uses a distinct hint text color).
 
 Locked tiles are read-only; overlay punctuation is always locked.
 
@@ -180,164 +201,208 @@ Locked tiles are read-only; overlay punctuation is always locked.
 
 ### 5.5 Line completion locking (spaces)
 
-- A **row** is _complete_ when every letter tile in that row is locked-correct (ignore spaces/overlay). When complete, **lock all space tiles** in that row with a muted "gutter" style.
-- A **column** is _complete_ when every letter tile in that column is locked-correct. When complete, **lock all space tiles** in that column.
+- A **row** is _complete_ when **every letter tile** in that row is **locked-correct** (ignore spaces/overlay). When complete, **lock all space tiles** in that row with a muted “gutter” style.
+- A **column** is _complete_ when **every letter tile** in that column is **locked-correct**. When complete, **lock all space tiles** in that column.
+- If a space tile is already locked (from a prior row/column completion), **leave it locked**; re-lock operations are no-ops.
 
 ---
 
 ## 6) Controls & Options
 
-- **Check**: runs full validation per §5.3 (according to current Auto‑check setting). Locks only correct letters; marks incorrect letters red; leaves empty cells unmarked.
-- **Clear**: clears all letter inputs and cell markings; overlay remains.
+- **Check**: runs full validation per §5.2 (according to current Auto-check setting). Locks only correct letters; marks incorrect letters red; leaves empty cells unmarked.
+- **Clear**: clears all letter inputs and cell markings; overlay remains. Also resets **session stats** and **hint budget**.
 - **Hint**: see §5.4.
 
 ### 6.1 Toggles (config)
 
-- **Show letter counts** _(default: OFF)_ — shows `need` as superscripts on chips.
-- **Auto‑check** _(default: OFF)_ — toggles the per‑keystroke validation model in §5.3.
+- **Show letter counts** _(default: OFF)_ — shows a superscript **Left** count on **hint letters** in each line.
+- **Auto-check** _(default: OFF)_ — toggles the per-keystroke validation model in §5.2.
+
+### 6.2 Hints budget
+
+- Default **3** hints per puzzle.
+- Budget **resets** on **Clear** and when loading a **new puzzle**.
 
 ---
 
 ## 7) Visual & Accessibility
 
-- Cell size = CSS var `--cell-size` (default 56px); hint tiles computed from it.
-- Minimum touch targets ≥ 48dp; keyboard nav with arrows; focus ring visible.
-- High‑contrast; chip states rely on both color and opacity, not color alone.
+- Cell size = CSS var `--cell-size` (default 56px); hint areas align to grid; hint tiles computed from it.
+- Minimum touch targets ≥ 48dp; keyboard nav with arrows; visible focus ring.
+- High-contrast; **hint letters** use muted styling/opacity for “completed”; **tiles** use border/lock styles (not color alone).
 
 ---
 
 ## 8) Persistence
 
-- Grid state key: `wordogram:<puzzleId>` → `{ values[], hintsLeft }`.
-- **Session statistics key**: `wordogram:<puzzleId>:stats` →
+- **Grid state** key: `wordogram:<puzzleId>` → `{ values[], hintsLeft }`.
+
+- **Session statistics** key (per-game): `wordogram:<puzzleId>:stats:session`
+
+- **Overall statistics** key (cumulative across clears): `wordogram:<puzzleId>:stats:overall`
 
 ```json
 {
   "hintsUsed": 0,
-  "incorrectLetters": 0, // total wrong entries typed or revealed by Check
-  "attempts": 0, // Auto‑check OFF: times Check was clicked; Auto‑check ON: incorrectLetters + 1 (on completion)
+  "incorrectLetters": 0, // increment on EVERY wrong input event or wrong mark
+  "attempts": 0, // Auto-check OFF: +1 per Check; Auto-check ON: incorrectLetters + 1 (on completion)
   "usedAutoCheck": false,
   "usedLetterCounts": false
 }
 ```
 
-- Stats update rules:
-  - Increment `hintsUsed` on each Hint.
-  - Increment `incorrectLetters` for each cell marked wrong during a Check, or each invalid keystroke in Auto‑check mode.
-  - Increment `attempts` on each Check (Auto‑check OFF). In Auto‑check ON, set `attempts = incorrectLetters + 1` when the puzzle is completed.
+**Stats update rules**
+
+- Increment `hintsUsed` on each **Hint**.
+- Increment `incorrectLetters` **every time** a wrong mark is produced (each invalid keystroke in Auto-check; each wrong cell on Check).
+- Increment `attempts` on each **Check** (Auto-check OFF).
+  Auto-check ON: set `attempts = incorrectLetters + 1` **when the puzzle is completed**.
+- **Clear** resets **session stats** (to 0) and the hint budget, but **does not** touch **overall** stats.
+  Loading a **new puzzle** resets session stats and hint budget.
 
 ---
 
 ## 9) Builder (phrase → puzzle)
 
-- Split on **whitespace only**; keep in‑chunk punctuation.
-- Choose width in `[minWidth..maxWidth]` to minimize lines; tie‑break smaller width.
-- Greedy shift for overlaps; optional pins `{row, rawIndex, targetCol}`.
-- Output matches Data Model v1.0.
+- **Split policy:** split on **whitespace only**; keep in-chunk punctuation (e.g., `"DON'T"`, `"ghost-white"`, `"it—"`).
+- **Visual width:** a chunk’s width equals its visible characters (letters + in-chunk punctuation).
+- **Overlay:** any **non-letter, non-space** character becomes `overlay` (digits, punctuation, symbols). The `solution` stores only letters + spaces; inter-chunk spacing is a single visible space.
+- **Width selection:** choose `W ∈ [minWidth..maxWidth]` to minimize number of lines; tie-break smaller `W`.
+- **Line packing:** single inter-chunk spaces; greedy line breaks by `W`.
+- **Overlap shifting:** greedily shift lines horizontally (within `W`) to maximize letter overlaps; optional pins `{ row, rawIndex, targetCol }` in visible-cell coordinates.
 
 ---
 
 ## 10) Acceptance Criteria
 
-1. **Overlay correctness**: punctuation auto‑fills in correct cells; excluded from counts.
-2. **Hint chips**: each line's chips reflect **todo / progress / done** accurately under both strict OFF and ON; **done** chips are muted.
-3. **Validation behavior**:
+1. **Overlay correctness:** punctuation auto-fills in correct cells; excluded from all counts.
+2. **Hints behavior:** letters mute **only** when all instances in that line are **locked**; with counts enabled, superscript shows **Left** (0 when complete). Updates occur **only** on validation events (Auto-check locks, Check, Hint, Clear/Reset).
+3. **Validation behavior:**
 
-   - Auto‑check OFF: **Check** locks only correct letters; marks only incorrect letters; leaves empty cells unmarked.
-   - Auto‑check ON: keystrokes immediately lock correct letters or mark red on mismatch; red clears when the input is emptied.
+   - Auto-check OFF: **Check** locks only correct letters; marks only incorrect letters; leaves empty cells unmarked.
+   - Auto-check ON: keystrokes immediately lock correct letters or mark red on mismatch; red clears when the input is emptied.
 
-4. **Hint button**: inserts a correct letter, **locks** it, and applies distinct **hint color**.
-5. **Row/Column completion**: when a line is complete, its **space cells lock** with a muted gutter style.
-6. **Layout**: row hints are horizontal lists; column hints are vertical lists; tiles are sized to `--cell-size` and never overflow neighbors.
+4. **Hint button:** inserts a correct letter, **locks** it, and applies distinct **hint color**.
+5. **Row/Column completion:** when a line is complete, its **space cells lock** with a muted gutter style.
+6. **Layout:** row hints are **single-line** horizontal lists; column hints are **single-column** vertical stacks; hint areas **expand** (no internal wrapping/scroll); tiles align to `--cell-size` and never overflow neighbors.
 7. **Statistics** persist and match the rules in §8.
 
 ---
 
 ## 11) Implementation Plan (Refactor)
 
-### Phase A — logic split
+**Phase A — logic split**
 
-- `logic/targets.js` → build RowTargets/ColTargets
-- `logic/evaluate.js` → `evaluateLine`, `validateCell`, `checkPuzzle`
-- `logic/hints.js` → chip state derivation per line
+- `logic/targets.js` → build RowTargets/ColTargets.
+- `logic/evaluate.js` → `validateCell`, `checkPuzzle`, line completion checks.
+- `logic/hints.js` → derive **Locked/Left** per line + muting rules + ordering (A→Z / vowels-first / deterministic shuffle).
 
-### Phase B — UI split
+**Phase B — UI split**
 
-- `ui/grid.js` → renderGrid, input handlers, locking helpers
-- `ui/hints.js` → render row/column hint tiles with orientation
-- `ui/stats.js` → track & persist session stats
-- `state/persist.js` → load/save
-- `app.js` → glue + controls
+- `ui/grid.js` → renderGrid, input handlers, locking helpers, nav/backspace skipping locks.
+- `ui/hints.js` → render row/column hint areas (no wrap, expand).
+- `ui/stats.js` → track & persist session/overall stats.
+- `state/persist.js` → load/save grid + stats.
+- `app.js` → glue + controls.
 
-### Phase C — styling
+**Phase C — styling**
 
-- Define `--cell-size`; set hint tile dims from it
-- Chip sizes: 11px text, 9px superscripts; tiles min‑height 32–36px
+- Define `--cell-size`; compute hint tile dims from it.
+- Hint-letter sizes: 11px text, 9px superscripts; hint tiles min-height 32–36px.
 
 ---
 
-## 12) Open Questions
+## 12) Open Questions (minor)
 
-- Smart hint selection (target conflicted lines) vs purely random?
-- Optional keyboard shortcuts (H for hint, Enter for check)?
+- **Non-ASCII letters:** keep A–Z only, or normalize accents (é→E) for imported phrases? (If needed, specify normalization in §9 and the builder.)
+- **Overlap tie-breaks:** if two shifts score equally, prefer **smaller shift** (left-bias) for compactness? (Default: yes.)
+- **Deterministic hint order seed:** confirm seed = puzzle `id` string hash (so web/Flutter render same order for a given mode).
 
 ---
 
 ## 13) Pseudocode Snippets
 
-**evaluateLine(lineIndex, axis: 'row'|'col', grid, targets, options)**
+**Derive per-line targets**
 
 ```
-T = targets[axis][lineIndex]  // Map<char, need>
-C = countLettersInLine(grid, axis, lineIndex) // Map<char, have>
-chip = {}
-for each letter L in T:
-  need = options.strict ? T[L] : 1
-  have = C[L] || 0
-  chip[L] = (have == 0) ? 'todo' : (have < need ? 'progress' : 'done')
-return { chip }
+deriveTargets(solution):
+  RowTargets[r] = countLetters(solution[r])
+  ColTargets[c] = countLetters( columnString(solution, c) )
+  return { RowTargets, ColTargets }
 ```
 
-**validateCell(r,c, grid, solution, options, mode)**
+**Derive remaining counts for hints**
 
 ```
-if mode === 'auto':
-  if empty: clear red; return
-  if letter == solution[r][c]: lock cell; return
-  else: mark red; stats.incorrectLetters++
-else: // manual; only respond on Check
-  do nothing here
+deriveLeft(axis, index, Locked, Targets):
+  T = Targets[axis][index]            // Map<char, targetCount>
+  L = Locked[axis][index]             // Map<char, lockedCount>
+  Left = {}
+  for each ch in T:
+    Left[ch] = max(T[ch] - (L[ch] || 0), 0)
+  return Left
+// UI: counts OFF -> mute letter if Left[ch]==0
+//     counts ON  -> show ch with sup Left[ch]; mute when Left[ch]==0
 ```
 
-**checkPuzzle(grid, solution, options)**
+**Validate a single cell**
 
 ```
-wrong = 0
-for each letter cell (r,c):
-  if typed == solution[r][c]: lock cell
-  else if typed != '' : mark red; wrong++
-// empty cells untouched
-stats.attempts++
-return wrong
+validateCell(r, c, typed, solution, mode):
+  if overlay(r,c): return 'overlay' // already locked by design
+  if solution[r][c] == ' ':
+    if mode == 'auto' and typed != '': markWrong(r,c)
+    return
+  if mode == 'auto':
+    if typed == solution[r][c]: lock(r,c)
+    else if typed != '': markWrong(r,c)
+    else clearMark(r,c)
+  // manual mode defers to checkPuzzle()
 ```
 
-**onHint()**
+**Check the whole puzzle (manual)**
 
 ```
-place a correct letter in a random unsolved cell
-lock it
-stats.hintsUsed++
+checkPuzzle(grid, solution):
+  wrong = 0
+  for each non-overlay cell (r,c):
+    typed = grid[r][c]
+    if typed == solution[r][c]: lock(r,c)
+    else if typed != '': markWrong(r,c), wrong++
+    else /* empty */ // not marked
+  return wrong
 ```
 
-**onLineCompleted(lineIndex, axis)**
+**On Hint**
 
 ```
-if all chips are 'done' AND every letter cell correct:
-  lock all space cells in that line with gutter style
+onHint():
+  pick random unsolved letter cell (r,c)
+  set grid[r][c] = solution[r][c]
+  lock(r,c)
+  stats.hintsUsed++
+```
+
+**On Line Completed (lock spaces)**
+
+```
+onLineCompleted(axis, index):
+  if every letter tile in the line is locked-correct:
+    for each space cell in the line:
+      if not already locked: lockSpace(r,c)
+```
+
+**Hint letter ordering**
+
+```
+orderHintLetters(letters, mode, seed):
+  if mode == 'AZ': return sortAZ(letters)
+  if mode == 'VOWELS_FIRST': return vowelsFirstAZ(letters)
+  if mode == 'DETERMINISTIC_SHUFFLE': return shuffleDeterministic(letters, seed)
 ```
 
 ---
 
 ## 14) Done = Ready to Code
 
-When the above is signed off, refactor the web prototype per §§11–13, then mirror the logic in Flutter with unit tests for chip states, validation modes, and stats updates.
+When this v1.3 is signed off, refactor the web prototype per §§11–13, then mirror the logic in Flutter with unit tests for hint updates, validation modes, stats, and ordering.
