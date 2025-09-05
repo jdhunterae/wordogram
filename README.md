@@ -262,7 +262,7 @@ Locked tiles are read-only; overlay punctuation is always locked.
 - **Split policy:** split on **whitespace only**; keep in-chunk punctuation (e.g., `"DON'T"`, `"ghost-white"`, `"it—"`).
 - **Visual width:** a chunk’s width equals its visible characters (letters + in-chunk punctuation).
 - **Overlay:** in-chunk punctuation becomes `overlay` entries at their visual columns; letters occupy the `solution` string; spaces between chunks are single visible spaces.
-- **Width selection:** choose `W ∈ [minWidth..maxWidth]` to minimize number of lines; tie-break smaller `W`. **Defaults:** `minWidth=14`, `maxWidth=24` if not provided.
+- **Width selection:** choose `W ∈ [minWidth..maxWidth]` to minimize number of lines; tie-break smaller `W`.
 - **Line packing:** single inter-chunk spaces; greedy line breaks by `W`.
 - **Overlap shifting:** greedily shift lines horizontally (within `W`) to maximize letter overlaps; optional pins `{ row, rawIndex, targetCol }` in visible-cell coordinates.
 
@@ -312,7 +312,7 @@ Locked tiles are read-only; overlay punctuation is always locked.
 ## 12) Open Questions (minor)
 
 - **Non-ASCII letters:** keep A–Z only, or normalize accents (é→E) for imported phrases? (If needed, specify normalization in §9 and the builder.)
-- **Overlap tie-breaks (RESOLVED):** prefer **smaller shift** per line (left-bias). No global total-shift tie-break.
+- **Overlap tie-breaks:** if two shifts score equally, prefer **smaller shift** (left-bias) for compactness? (Default: yes.)
 - **Deterministic hint order seed:** confirm seed = puzzle `id` string hash (so web/Flutter render same order for a given mode).
 
 ---
@@ -431,9 +431,9 @@ When this v1.3 is signed off, refactor the web prototype per §§11–13, then m
   - `DON'T STOP` → chunks: `DON'T`, `STOP`
   - `ghost-white` → single chunk (overlay `-` in-grid)
   - `He lived at 123 Baker Street.` → overlay for `1`, `2`, `3`, and `.`
-- **Greedy packing by width:** Search widths within `minWidth..maxWidth` (defaults: **minWidth=14**, **maxWidth=24**). Primary objective: **minimize rows**. Tie-breaker: **smaller width**.
-- **Overlap shifting:** For each next line, evaluate shifts `0..W-1` and choose the shift with the **highest** overlap score; iterate left-to-right, so ties automatically prefer the **smaller shift** (left-bias). Spaces/overlay cells do **not** block overlap. **No global total-shift minimization** is used.
-- **Pins:** `rawIndex` is the **zero-based column in the raw, unshifted line string** (letters + spaces + punctuation). `targetCol` is the desired grid column. Pins are applied **before** overlap shifting on that line. If a pin makes placement impossible, the builder must emit a readable error (`PIN_CONFLICT`) and abort.
+- **Greedy packing by width:** Search widths within `minWidth..maxWidth` (default **9..18**). Primary objective: **minimize rows**. Tie-breakers: (1) **smaller width**, (2) **smaller total shift**.
+- **Overlap shifting:** For each next line, attempt shifts `0..W-1` and pick the smallest shift that never mismatches locked letters from previous lines. Spaces/overlay cells do **not** block overlap. Cost = sum of chosen shifts across lines; pick minimal cost; tie-break by smaller first conflicting shift.
+- **Pins:** Pin coordinates are **visible column indices**. Pins are applied **before** overlap shifting on that line. If a pin makes a placement impossible, the builder must emit a readable error (`PIN_CONFLICT` with context) and abort.
 - **Determinism:** With the same `(phrase, options)`, the builder output is deterministic. Any future randomness must be **seedable** via options.
 
 ### D. Hints & Validation (Player Experience)
@@ -493,3 +493,20 @@ export interface WordogramPuzzle {
 ```
 
 _(Optional JSON Schema can be added later; TS types above are the source of truth for v0.3.)_
+
+### Width Selection Defaults & Heuristic (v1.3)
+
+- **Defaults:** `minWidth=9`, `maxWidth=18` (unless options override).
+- **Heuristic:**
+  1. Let `Lmax` be the length of the longest chunk (word). Set `minWidth = max(9, Lmax)`.
+  2. Set `maxWidth = max(minWidth, 18)`.
+  3. Evaluate candidate widths `W ∈ [minWidth..maxWidth]` and pick the `W` that yields row count in **[3..6]**; otherwise choose the `W` closest to **4** rows.
+  4. Tie-breakers: (a) **smaller width**, (b) left-biased overlap shifting.
+
+#### Example: “THE EARLY BIRD GETS THE WORM”
+
+- Tokens: THE · EARLY · BIRD · GETS · THE · WORM (Lmax = 5)
+- Defaults ⇒ minWidth = 9; maxWidth = 18
+- `W=14` → ["THE EARLY BIRD", "GETS THE WORM"] → rows ≈ 2 (too few)
+- `W=9`  → ["THE EARLY", "BIRD GETS", "THE WORM"] → rows = 3 (balanced)
+- `W=6`  → ["THE", "EARLY", "BIRD", "GETS", "THE", "WORM"] → rows = 6 (compact; would require minWidth=6)
