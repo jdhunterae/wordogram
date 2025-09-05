@@ -74,6 +74,7 @@ An interactive cell that may target either a **letter** _or_ a **space** in the 
 - **Editable — typed**: a letter (A–Z) is present; still editable until validated/locked.
 - **Locked — correct letter**: confirmed match (via Auto-check, Check, or Hint). Input disabled; distinct locked style. Hint-placed letters use a distinct **hint color**.
 - **Locked — space**: solution is a space. During play it stays editable/empty and is **never marked** by itself. It locks (muted “gutter” style) **only when its row or column is complete** or after a **Check** that completes that line.
+<!-- TODO: Clarify: does Check *always* lock spaces if a line becomes complete, or only completion events? -->
 - **Marked — wrong**: red border when the typed letter is incorrect for that cell. The border clears when the letter is removed or corrected. **Empty tiles are never marked.**
 
 **Typing rules**
@@ -110,6 +111,7 @@ There are **no chips and no glyphs** (no ✓/✕/!). Hints are just **letters** 
   - **Normal**: show each distinct letter with a `sup` of how many are **left to be found** in that line:
     `Left(letter) = TargetCount(letter in line) − LockedCount(letter in line)`
     `LockedCount` counts **only locked-correct** tiles (Auto-check, Check, Hint). Typed-but-not-validated letters do **not** reduce `Left`.
+    <!-- TODO: Reconfirm: should counts *only* decrement on locked letters, never typed ones? -->
   - **Completed**: **mute** the letter and show `sup 0` when **all instances** are locked.
 
 > A letter is muted **only** when its **LockedCount** meets the target. Merely typing a letter (not yet validated/locked) never mutes it or reduces `Left`.
@@ -136,6 +138,7 @@ To avoid revealing word order, **do not** preserve first-occurrence order. The o
 
 - **Default:** alphabetical **A→Z** (stable).
 - **Optional modes:** **vowels-first** (A,E,I,O,U then B→Z), or a **deterministic shuffle** seeded by the puzzle ID (so all players see the same order for a given puzzle).
+<!-- TODO: Confirm: is deterministic shuffle required for v1.3? Seed = puzzle ID hash? -->
 
 ---
 
@@ -173,6 +176,7 @@ Hint visuals depend only on **Locked** (not on typed letters).
 - Locked tiles ignore further input.
 
 **Space targets:** If `solution[r][c]` is a **space**, any typed letter is **wrong** when validation is active (red border in Auto-check; marked red on Check). Leaving it empty is neutral and never marked.
+<!-- TODO: Explicitly confirm: manual Check marks a typed space red the same way as Auto-check. -->
 
 **Navigation & backspace with locks (both modes):**
 
@@ -207,6 +211,7 @@ Locked tiles are read-only; overlay punctuation is always locked.
 
 - **Check**: runs full validation per §5.2 (according to current Auto-check setting). Locks only correct letters; marks incorrect letters red; leaves empty cells unmarked.
 - **Clear**: clears all letter inputs and cell markings; overlay remains. Also resets **session stats** and **hint budget**.
+<!-- TODO: Decide if a "Clear Line" control exists alongside Clear Puzzle. If so, does it also reset hints? -->
 - **Hint**: see §5.4.
 
 ### 6.1 Toggles (config)
@@ -232,6 +237,7 @@ Locked tiles are read-only; overlay punctuation is always locked.
 ## 8) Persistence
 
 - **Grid state** key: `wordogram:<puzzleId>` → `{ values[], hintsLeft }`.
+<!-- TODO: Clarify whether values[] encodes only typed letters, or also locked/correct states. -->
 
 - **Session statistics** key (per-game): `wordogram:<puzzleId>:stats:session`
 
@@ -241,7 +247,9 @@ Locked tiles are read-only; overlay punctuation is always locked.
 {
   "hintsUsed": 0,
   "incorrectLetters": 0, // increment on EVERY wrong input event or wrong mark
+  // <!-- TODO: Confirm: increment on each keystroke (spammable) or once per validation event? -->
   "attempts": 0, // increments by 1 upon successful completion (solve), regardless of Auto-check setting
+  // <!-- TODO: Clarify whether "attempts" counts every new solve (after Clear) or only the first successful solve. -->
   "usedAutoCheck": false,
   "usedLetterCounts": false
 }
@@ -263,8 +271,10 @@ Locked tiles are read-only; overlay punctuation is always locked.
 - **Visual width:** a chunk’s width equals its visible characters (letters + in-chunk punctuation).
 - **Overlay:** in-chunk punctuation becomes `overlay` entries at their visual columns; letters occupy the `solution` string; spaces between chunks are single visible spaces.
 - **Width selection:** choose `W ∈ [minWidth..maxWidth]` to minimize number of lines; tie-break smaller `W`.
+<!-- TODO: Clarify priority order if multiple layouts tie on rows, width, and shifts. -->
 - **Line packing:** single inter-chunk spaces; greedy line breaks by `W`.
 - **Overlap shifting:** greedily shift lines horizontally (within `W`) to maximize letter overlaps; optional pins `{ row, rawIndex, targetCol }` in visible-cell coordinates.
+<!-- TODO: Decide: does v1.3 include elastic multi-space gaps, or only uniform shifting? -->
 
 **Pins example:** For the raw string `"BAKER."` at `row 0` with `W=10`, if you want the period to end at column 9, specify a pin `{ row: 0, rawIndex: 5, targetCol: 9 }`. (Indices are zero-based; `rawIndex` is within the raw visual string that includes letters, spaces, and overlay characters.)
 
@@ -283,6 +293,9 @@ Locked tiles are read-only; overlay punctuation is always locked.
 5. **Row/Column completion:** when a line is complete, its **space cells lock** with a muted gutter style.
 6. **Layout:** row hints are **single-line** horizontal lists; column hints are **single-column** vertical stacks; hint areas **expand** (no internal wrapping/scroll); tiles align to `--cell-size` and never overflow neighbors.
 7. **Statistics** persist and match the rules in §8.
+<!-- TODO: Clarify whether stats persistence must survive across browser sessions, or only within a play session. -->
+<!-- TODO: Consider adding explicit accessibility criteria (keyboard nav, ARIA labels). -->
+
 
 ---
 
@@ -312,8 +325,11 @@ Locked tiles are read-only; overlay punctuation is always locked.
 ## 12) Open Questions (minor)
 
 - **Non-ASCII letters:** keep A–Z only, or normalize accents (é→E) for imported phrases? (If needed, specify normalization in §9 and the builder.)
+<!-- TODO: Decide policy for v1.3: overlay vs. normalize accents. -->
 - **Overlap tie-breaks:** if two shifts score equally, prefer **smaller shift** (left-bias) for compactness? (Default: yes.)
+<!-- TODO: Lock down overlap tie-break hierarchy (rows > width > shifts). -->
 - **Deterministic hint order seed:** confirm seed = puzzle `id` string hash (so web/Flutter render same order for a given mode).
+<!-- TODO: Either finalize seed choice for v1.3 or mark as deferred. -->
 
 ---
 
