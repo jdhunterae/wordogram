@@ -427,7 +427,35 @@ When this v1.3 is signed off, refactor the web prototype per §§11–13, then m
 
 ### C. Builder Algorithm (Deterministic)
 
-- **Tokenization:** Split the input phrase on whitespace only. Keep in-chunk punctuation/symbols (which become overlay). Examples:
+- **Row shifting (elastic gaps, v1.3 default):**
+  - **Goal:** Maximize letter–letter overlaps with previously placed rows **without conflicts**, by distributing extra spaces across the line.
+  - **Model:** Treat a line as `chunks` (words) separated by `gaps`. Include a **leading gap** (before the first word) and **trailing gap** (after the last word). Baseline sizes: leading/trailing = `0`, inter-word = `1`.
+  - **Capacity:** With target width `W`, choose non‑negative integers `Δg` to **extend** gaps so that:  
+    `sum(len(chunks)) + sum(baseline_gaps) + sum(Δg) = W`.
+  - **Constraints:**
+    - Minimum inter-word separation is `1` (baseline). Extra spaces are added only to gaps: `gap_size = baseline + Δg`.
+    - Letters cannot conflict: if any previous row has a **letter** at column `c`, the current line may place a **letter** at `c` **only if it is the same letter**. (`space`/`overlay` are neutral.)
+    - **Optional readability guardrails (defaults):** each gap may extend to at most **4 total spaces** (`baseline + Δg ≤ 4`). The leading/trailing gaps may extend up to **W** if needed.
+  - **Score:** Count of positions where a letter in the current line aligns with the **same letter** in any prior row. (`overlay`/`space` do not score.)
+  - **Optimization:** Among all feasible `Δ` assignments, choose the one with the **highest score**. Tie‑breakers: (1) **smaller total extra spaces** `sum(Δg)`; (2) **fewer extended gaps** (sparsity); (3) prefer **earlier** gaps (left‑bias).
+  - **Determinism:** Break any remaining ties by the natural left‑to‑right evaluation order.
+  - **Example:**  
+    Input rows (conceptual), `W` sufficiently wide for alignment:
+
+    ```
+    THIS EXAMPLE
+     HAS   A
+        FEW
+        LETTERS
+    THAT
+       OVERLAP
+    ```
+
+    Here, multiple lines use **leading gap** indentation and **inter‑word gap** expansion (e.g., between `HAS` and `A`) to align overlapping letters while keeping at least one space between words.
+- **Overlap shifting (legacy uniform, v0.3 builders):**
+  - If elastic gaps are **not implemented** by a builder, it MAY fall back to uniform shifting: evaluate shifts `0..W-1` and pick the left‑biased shift with the highest overlap score (letters only). This behavior is **deprecated** in v1.3 but tolerated for backward compatibility.
+
+- **Tokenization:** Split the input phrase on whitespace only. Keep in-chunk punctuation/symbols (which become overlay). Initial packing uses **single spaces** between words; **elastic gap expansion** may add more spaces later to meet width and overlap goals. Examples:
   - `DON'T STOP` → chunks: `DON'T`, `STOP`
   - `ghost-white` → single chunk (overlay `-` in-grid)
   - `He lived at 123 Baker Street.` → overlay for `1`, `2`, `3`, and `.`
