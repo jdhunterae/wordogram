@@ -52,13 +52,11 @@ A **letter-picross** built from a hidden phrase. Each **row** and **column** sho
 - **Spaces:** Visible spaces are preserved (single space between chunks after packing).
 - **Authoring note:** Quotes/phrases must be English without accents/diacritics. If such characters are present, they are treated as non-letters and would become overlay; avoid them when authoring.
 
-
 Derived at runtime (not stored):
 
 - `RowTargets[r] = Map<char, count>` from `solution[r]` (letters only).
 - `ColTargets[c] = Map<char, count>` from column letters (ignore spaces/overlay).
 - `OverlaySet = Set` of (row*cols+col) from `overlay`.
-
 
 ---
 
@@ -243,7 +241,7 @@ Locked tiles are read-only; overlay punctuation is always locked.
 {
   "hintsUsed": 0,
   "incorrectLetters": 0, // increment on EVERY wrong input event or wrong mark
-  "attempts": 0, // Auto-check OFF: +1 per Check; Auto-check ON: incorrectLetters + 1 (on completion)
+  "attempts": 0, // increments by 1 upon successful completion (solve), regardless of Auto-check setting
   "usedAutoCheck": false,
   "usedLetterCounts": false
 }
@@ -253,8 +251,7 @@ Locked tiles are read-only; overlay punctuation is always locked.
 
 - Increment `hintsUsed` on each **Hint**.
 - Increment `incorrectLetters` **every time** a wrong mark is produced (each invalid keystroke in Auto-check; each wrong cell on Check).
-- Increment `attempts` on each **Check** (Auto-check OFF).
-  Auto-check ON: set `attempts = incorrectLetters + 1` **when the puzzle is completed**.
+- Increment `attempts` by **1** when the puzzle transitions to the **solved** state (after a successful Check in manual mode, or automatically when all letters lock in Auto-check).
 - **Clear** resets **session stats** (to 0) and the hint budget, but **does not** touch **overall** stats.
   Loading a **new puzzle** resets session stats and hint budget.
 
@@ -265,7 +262,7 @@ Locked tiles are read-only; overlay punctuation is always locked.
 - **Split policy:** split on **whitespace only**; keep in-chunk punctuation (e.g., `"DON'T"`, `"ghost-white"`, `"it—"`).
 - **Visual width:** a chunk’s width equals its visible characters (letters + in-chunk punctuation).
 - **Overlay:** in-chunk punctuation becomes `overlay` entries at their visual columns; letters occupy the `solution` string; spaces between chunks are single visible spaces.
-- **Width selection:** choose `W ∈ [minWidth..maxWidth]` to minimize number of lines; tie-break smaller `W`.
+- **Width selection:** choose `W ∈ [minWidth..maxWidth]` to minimize number of lines; tie-break smaller `W`. **Defaults:** `minWidth=14`, `maxWidth=24` if not provided.
 - **Line packing:** single inter-chunk spaces; greedy line breaks by `W`.
 - **Overlap shifting:** greedily shift lines horizontally (within `W`) to maximize letter overlaps; optional pins `{ row, rawIndex, targetCol }` in visible-cell coordinates.
 
@@ -315,7 +312,7 @@ Locked tiles are read-only; overlay punctuation is always locked.
 ## 12) Open Questions (minor)
 
 - **Non-ASCII letters:** keep A–Z only, or normalize accents (é→E) for imported phrases? (If needed, specify normalization in §9 and the builder.)
-- **Overlap tie-breaks:** if two shifts score equally, prefer **smaller shift** (left-bias) for compactness? (Default: yes.)
+- **Overlap tie-breaks (RESOLVED):** prefer **smaller shift** per line (left-bias). No global total-shift tie-break.
 - **Deterministic hint order seed:** confirm seed = puzzle `id` string hash (so web/Flutter render same order for a given mode).
 
 ---
@@ -416,7 +413,7 @@ When this v1.3 is signed off, refactor the web prototype per §§11–13, then m
 ### A. Character Set, Normalization, and Escaping
 
 - **Letters:** ASCII **A–Z only**. The builder uppercases input and treats only `[A-Za-z]` as letters.
-- **Non-letters:** **Any** non-letter, non-space character (e.g., digits `0–9`, punctuation, symbols, curly quotes, em/en dashes) is emitted as an **overlay** entry and occupies a visible grid cell.
+- **Non-letters:** **Any** non-letter, non-space character (e.g., digits `0–9`, punctuation, symbols, curly quotes, em/en dashes) is emitted as an **overlay** entry and occupies a visible grid cell. **No punctuation whitelist is used; classification is purely non-letter/non-space.**
 - **Spaces:** Visible spaces are preserved. The builder normalizes author input to **single spaces** between chunks, trimming leading/trailing whitespace and converting tabs/newlines to spaces.
 - **HTML-safety:** Overlay characters are rendered with HTML-escaping for `&`, `<`, `>`, `"`, and `'` to prevent injection. Letters and spaces are safe by construction.
 
@@ -434,9 +431,9 @@ When this v1.3 is signed off, refactor the web prototype per §§11–13, then m
   - `DON'T STOP` → chunks: `DON'T`, `STOP`
   - `ghost-white` → single chunk (overlay `-` in-grid)
   - `He lived at 123 Baker Street.` → overlay for `1`, `2`, `3`, and `.`
-- **Greedy packing by width:** Search widths within `minWidth..maxWidth` (default **14..24**). Primary objective: **minimize rows**. Tie-breakers: (1) **smaller width**, (2) **smaller total shift**.
-- **Overlap shifting:** For each next line, attempt shifts `0..W-1` and pick the smallest shift that never mismatches locked letters from previous lines. Spaces/overlay cells do **not** block overlap. Cost = sum of chosen shifts across lines; pick minimal cost; tie-break by smaller first conflicting shift.
-- **Pins:** Pin coordinates are **visible column indices**. Pins are applied **before** overlap shifting on that line. If a pin makes a placement impossible, the builder must emit a readable error (`PIN_CONFLICT` with context) and abort.
+- **Greedy packing by width:** Search widths within `minWidth..maxWidth` (defaults: **minWidth=14**, **maxWidth=24**). Primary objective: **minimize rows**. Tie-breaker: **smaller width**.
+- **Overlap shifting:** For each next line, evaluate shifts `0..W-1` and choose the shift with the **highest** overlap score; iterate left-to-right, so ties automatically prefer the **smaller shift** (left-bias). Spaces/overlay cells do **not** block overlap. **No global total-shift minimization** is used.
+- **Pins:** `rawIndex` is the **zero-based column in the raw, unshifted line string** (letters + spaces + punctuation). `targetCol` is the desired grid column. Pins are applied **before** overlap shifting on that line. If a pin makes placement impossible, the builder must emit a readable error (`PIN_CONFLICT`) and abort.
 - **Determinism:** With the same `(phrase, options)`, the builder output is deterministic. Any future randomness must be **seedable** via options.
 
 ### D. Hints & Validation (Player Experience)
